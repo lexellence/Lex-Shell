@@ -142,7 +142,7 @@ void ExecuteExternalApp(const std::vector<std::string>& wordList)
 	}
 	else
 	{
-		// This is the parent process, so wait for child to finish
+		// This is the parent process, so wait for child to finish, or bail if error
 		if(waitpid(child_pid, nullptr, WUNTRACED) < 0)
 		{
 			perror("Could not wait for child process");
