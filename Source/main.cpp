@@ -8,14 +8,30 @@
 //		std::string::size_type is converted to int
 //		If a different splitting algorithm was used, this could be removed.
 const std::string::size_type MAX_COMMAND_LENGTH{ 1024 };
+
+void MainLoop();
 void SeparateIntoWords(const std::string& inputString, std::vector<std::string>& outputWordList);
 void PrintWordList(const std::vector<std::string>& wordList);
 void ExecuteExternalApp(const std::vector<std::string>& wordList);
 
 int main()
 {
-    while(true)
-    {
+	try
+	{
+		MainLoop();
+	}
+	catch(const std::exception & e)
+	{
+		std::cerr << "Fatal Exception: " << e.what() << std::endl;
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+}
+
+void MainLoop()
+{
+	while(true)
+	{
 		// Display prompt
 		std::cout << "lex$ ";
 
@@ -34,12 +50,11 @@ int main()
 
 		// Execute built-in command if one exists, otherwise try executing external application
 		if(wordList[0] == "exit")
-			return 0;
+			return;
 		else
 			ExecuteExternalApp(wordList);
 	}
 }
-
 void SeparateIntoWords(const std::string& inputString, std::vector<std::string>& outputWordList)
 {
 	// Make sure output is empty
