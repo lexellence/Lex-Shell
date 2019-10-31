@@ -1,0 +1,11 @@
+Shell:
+	loop forever:
+		display prompt
+		read line input
+		tokenize
+		record in history list
+		if built-in command, execute (after validating arguments)
+		else fork a child process which calls execvp
+		if its a background job, record in background job list and continue
+		else wait for child to finish
+		
