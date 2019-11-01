@@ -9,10 +9,18 @@
 //		If a different splitting algorithm was used, this could be removed.
 const std::string::size_type MAX_COMMAND_LENGTH{ 1024 };
 
+// Console text color formatting codes
+const std::string defaultStyle("\033[0m");
+const std::string greenOnDefault("\033[0;32;49m");
+const std::string blueOnDefault("\033[0;34;49m");
+const std::string greenOnDefaultBold("\033[1;32;49m");
+const std::string blueOnDefaultBold("\033[1;34;49m");
+
 void MainLoop();
 void SeparateIntoWords(const std::string& inputString, std::vector<std::string>& outputWordList);
 void PrintWordList(const std::vector<std::string>& wordList);
-void ExecuteExternalApp(const std::vector<std::string>& wordList);
+void ExecuteExternalApp(const std::vector<std::string>& pathAndArgs);
+void GetWorkingDirectory(std::string& pathOutput);
 
 int main()
 {
@@ -30,10 +38,18 @@ int main()
 
 void MainLoop()
 {
+	// Clear terminal
+	ExecuteExternalApp({ "clear" });
+
 	while(true)
 	{
-		// Display prompt
-		std::cout << "lex$ ";
+		// Display shell prompt including current directory
+		std::string workingDirectoryString;
+		GetWorkingDirectory(workingDirectoryString);
+		std::cout << greenOnDefaultBold << "lex"
+			<< defaultStyle << ':'
+			<< blueOnDefaultBold << '~' << workingDirectoryString
+			<< defaultStyle << "$ ";
 
 		// Get list of words from command-line
 		std::string inputLineString;
@@ -48,9 +64,41 @@ void MainLoop()
 		if(wordList.empty())
 			continue;
 
+		//SeparateIntoCommands(wordList, wordListVector);
+
 		// Execute built-in command if one exists, otherwise try executing external application
 		if(wordList[0] == "exit")
 			return;
+		else if(wordList[0] == "cd")
+		{
+			if(wordList.size() != 2)
+			{
+				std::cerr << "Invalid number of arguments. Usage: $ cd <dir>" << std::endl;
+				continue;
+			}
+			else
+			{
+				// If we need to expand tilde to home directory
+				if(wordList[1][0] == '~')
+				{
+					// Try to get home directory
+					std::string directoryString;
+					char* homeDirectory = getenv("HOME");
+
+					// If home directory exists, start the directory path with it
+					if(homeDirectory)
+						directoryString += homeDirectory;
+
+					// Add the rest of the directory path
+					directoryString += wordList[1].substr(1, wordList[1].length() - 1);
+				}
+				else
+				{
+					// Attempt to change working directory without any tilde expansion
+					chdir(wordList[1].c_str());
+				}
+			}
+		}
 		else
 			ExecuteExternalApp(wordList);
 	}
@@ -103,50 +151,64 @@ void PrintWordList(const std::vector<std::string>& wordList)
 			std::cout << ' ';
 	}
 }
-void ExecuteExternalApp(const std::vector<std::string>& wordList)
+void ExecuteExternalApp(const std::vector<std::string>& pathAndArgs)
 {
-	if(wordList.empty())
+	if(pathAndArgs.empty())
 		return;
 
 	pid_t child_pid;
 	child_pid = fork();
 
-	// Bail if fork failed
+	// If fork failed, print error
 	if(child_pid < 0)
 	{
-		perror("Could not create child process");
-		exit(EXIT_FAILURE);
+		std::string message{ "Error creating child process to execute " + pathAndArgs[0] };
+		perror(message.c_str());
 	}
 
 	// If this is the child process, execute external app
 	if(child_pid == 0)
 	{
 		// Convert std::string list to c-style string list 
-		std::vector <char const*> cStyleStringList;
-		for(auto word : wordList)
-			cStyleStringList.push_back(word.c_str());
+		std::vector<char*> cStyleStringList;
+		for(auto const& word : pathAndArgs)
+			cStyleStringList.emplace_back(const_cast<char*>(word.c_str()));
 
 		// exec expects null-terminated array
 		cStyleStringList.push_back(nullptr);
 
 		// execute program with arguments
-		int result;
-		result = execvp(cStyleStringList[0], const_cast <char* const*> (cStyleStringList.data()));
+		int result = execvp(cStyleStringList[0], cStyleStringList.data());
 
-		// Bail if execvp failed
+		// If execvp failed, print error and terminate child process
 		if(result < 0)
 		{
-			perror(cStyleStringList[0]);
+			std::string message{ "Error executing " + pathAndArgs[0] };
+			perror(message.c_str());
 			exit(EXIT_FAILURE);
 		}
 	}
 	else
 	{
-		// This is the parent process, so wait for child to finish, or bail if error
+		// This is the parent process, so wait for child to finish
 		if(waitpid(child_pid, nullptr, WUNTRACED) < 0)
 		{
-			perror("Could not wait for child process");
-			exit(EXIT_FAILURE);
+			// Print error, if any
+			std::string message{ "Error waiting for and reaping child process " + pathAndArgs[0] };
+			perror(message.c_str());
 		}
 	}
+}
+void GetWorkingDirectory(std::string& pathOutput)
+{
+	char cwd[256];
+	char* result;
+	result = getcwd(cwd, sizeof(cwd));
+	if(!result)
+	{
+		perror("Failed to get current working directory");
+		pathOutput.clear();
+	}
+	else
+		pathOutput = cwd;
 }
