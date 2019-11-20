@@ -118,6 +118,7 @@ void ExecuteCommand(const Command& command)
 	else
 		ExecuteExternalApp(command);
 }
+
 void ChangeWorkingDirectory(const std::string& directory)
 {
 	// If no directory specified, change to root directory
@@ -182,29 +183,36 @@ void ExecuteExternalApp(const Command& command)
 		perror(message.c_str());
 	}
 
+	// Child
 	if(child_pid == 0)
 	{
-		// This is the child process
-
 		// Convert command to c-style string list 
 		std::vector<char*> cStyleStringList;
+		{
+			// Separate path from app name and only put name in argv[0] while sending the full path to execvp 
+			{
+				std::string appName;
+				{
+					std::size_t endOfPathIndex{ command.name.find_last_of('/') };
+					if(endOfPathIndex == std::string::npos)
+						appName = command.name;
+					else
+						appName = command.name.substr(endOfPathIndex + 1);
+				}
+				cStyleStringList.emplace_back(const_cast<char*>(appName.c_str()));
+			}
 
-		// argv[0] is always the app name		
-		//************************************************  
-		//TODO: separate path from app name (detecting last '/')  and only put name in argv[0] while sending the full path to execvp 
-		//************************************************
-		cStyleStringList.emplace_back(const_cast<char*>(command.name.c_str()));
+			// Add arguments
+			for(auto const& arg : command.arguments)
+				cStyleStringList.emplace_back(const_cast<char*>(arg.c_str()));
 
-		// Add arguments
-		for(auto const& arg : command.arguments)
-			cStyleStringList.emplace_back(const_cast<char*>(arg.c_str()));
+			// exec expects null-terminated array
+			cStyleStringList.push_back(nullptr);
+		}
 
-		// exec expects null-terminated array
-		cStyleStringList.push_back(nullptr);
-
-		// execute program with arguments
+		// execute program
 		errno = 0;
-		int result = execvp(cStyleStringList[0], cStyleStringList.data());
+		int result = execvp(command.name.c_str(), cStyleStringList.data());
 
 		// If execvp failed, print error and terminate child process
 		if(result < 0)
@@ -214,9 +222,10 @@ void ExecuteExternalApp(const Command& command)
 			exit(EXIT_FAILURE);
 		}
 	}
+	// Parent
 	else
 	{
-		// This is the parent process, so wait for child to finish
+		// Wait for child to finish
 		errno = 0;
 		if(waitpid(child_pid, nullptr, WUNTRACED) < 0)
 		{
