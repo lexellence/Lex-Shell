@@ -148,7 +148,7 @@ void ChangeWorkingDirectory(const std::string& directory)
 	else
 		finalDirectory = directory;
 
-	// Change working directory
+	// Change working directory (while retaining current working directory for cdl command)
 	std::string savedWorkingDirectory;
 	GetWorkingDirectory(savedWorkingDirectory);
 	bool error;
@@ -160,7 +160,10 @@ void ChangeWorkingDirectory(const std::string& directory)
 		perror(message.c_str());
 	}
 	else
+	{
+		// Only overwrite last directory if we successfully changed directories.
 		lastWorkingDirectory = savedWorkingDirectory;
+	}
 }
 
 void ExecuteExternalApp(const Command& command)
