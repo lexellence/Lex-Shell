@@ -10,12 +10,6 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-// Limit command numChars to make sure SeparateIntoWords works correctly:
-//		std::string::size_type is converted to int, which is potentially a narrowing conversion.
-//		So we must put a limit on the value, but we could make this limit as high as INT_MAX if we wanted.
-//		If a different splitting algorithm was used without this conversion, this limit could be removed.
-const std::string::size_type MAX_COMMAND_LENGTH{ 1024 };
-
 // Separators
 const char WHITE_SPACE_CHAR_1{ ' ' };
 const char WHITE_SPACE_CHAR_2{ '\t' };
@@ -275,18 +269,9 @@ void PrintPrompt()
 }
 void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut)
 {
-	// Make sure output is empty
-	commandListOut.clear();
-
-	// Don't process empty input
-	if(wordList.empty())
-		return;
-
-	// Convert length to signed integer so that (currentWord - currentCommandStart + 1) works below
-	int numWords = (int)wordList.size();
-
 	// Go word by word, finding the start and end of each command, and making a list
-	for(int currentWord = 0, currentCommandStart = 0; currentWord < numWords; ++currentWord)
+	commandListOut.clear();
+	for(std::vector<std::string>::size_type currentWord = 0, currentCommandStart = 0; currentWord < wordList.size(); ++currentWord)
 	{
 		// If current word is command separator
 		if(wordList[currentWord] == COMMAND_SEPARATOR_1 || wordList[currentWord] == COMMAND_SEPARATOR_2)
@@ -299,7 +284,7 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 				command.name = wordList[currentCommandStart];
 
 				// Record arguments, if any
-				for(int i = currentCommandStart + 1; i < currentWord; ++i)
+				for(std::vector<std::string>::size_type i = currentCommandStart + 1; i < currentWord; ++i)
 					command.arguments.push_back(wordList[i]);
 
 				// Record command
@@ -311,17 +296,17 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 		}
 
 		// If we are at the last word
-		if(currentWord == numWords - 1)
+		if(currentWord + 1 == wordList.size())
 		{
 			// If current command has any words, record the command
-			if(currentWord - currentCommandStart + 1 > 0)
+			if(currentWord + 1 > currentCommandStart)
 			{
 				// Record command name
 				Command command;
 				command.name = wordList[currentCommandStart];
 
 				// Record arguments, if any
-				for(int i = currentCommandStart + 1; i <= currentWord; ++i)
+				for(std::vector<std::string>::size_type i = currentCommandStart + 1; i <= currentWord; ++i)
 					command.arguments.push_back(wordList[i]);
 
 				// Record command
@@ -396,25 +381,9 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 }*/
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& outputWordList)
 {
-	// Make sure output is empty
-	outputWordList.clear();
-
-	// Don't process empty input
-	if(input.empty())
-		return;
-
-	// Verify command is not too long
-	if(input.length() > MAX_COMMAND_LENGTH)
-	{
-		std::cerr << SHELL_NAME << ": Exceeded maximum of " << MAX_COMMAND_LENGTH << " characters." << std::endl;
-		return;
-	}
-
-	// Convert length to signed integer so that (currentChar - currentWordStart + 1) works below
-	int numChars = (int)input.length();
-
 	// Go char by char, finding the start and end of each word, and making a list
-	for(int currentChar = 0, currentWordStart = 0; currentChar < numChars; ++currentChar)
+	outputWordList.clear();
+	for(std::string::size_type currentChar = 0, currentWordStart = 0; currentChar < input.size(); ++currentChar)
 	{
 		// If current character is whitespace
 		if(input[currentChar] == WHITE_SPACE_CHAR_1 || input[currentChar] == WHITE_SPACE_CHAR_2)
@@ -428,11 +397,11 @@ void SeparateIntoWords(const std::string& input, std::vector<std::string>& outpu
 		}
 
 		// If we are at the last character
-		if(currentChar == numChars - 1)
+		if(currentChar + 1 == input.size())
 		{
 			// If current word has any characters, record the word
-			if(currentChar - currentWordStart + 1 > 0)
-				outputWordList.push_back(input.substr(currentWordStart, currentChar - currentWordStart + 1));
+			if(currentChar + 1 > currentWordStart)
+				outputWordList.push_back(input.substr(currentWordStart, (currentChar + 1) - currentWordStart));
 		}
 	}
 }
