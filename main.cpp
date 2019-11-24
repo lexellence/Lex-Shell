@@ -27,8 +27,13 @@ const std::string CHANGE_TO_LAST_DIRECTORY_COMMAND{ "cdl" };
 const std::string TEXT_STYLE_DEFAULT{ "\033[0m" };
 const std::string TEXT_STYLE_GREEN_ON_DEFAULT{ "\033[0;32;49m" };
 const std::string TEXT_STYLE_BLUE_ON_DEFAULT{ "\033[0;34;49m" };
+const std::string TEXT_STYLE_RED_ON_DEFAULT{ "\033[0;31;49m" };
+const std::string TEXT_STYLE_YELLOW_ON_DEFAULT{ "\033[0;33;49m" };
 const std::string TEXT_STYLE_GREEN_ON_DEFAULT_BOLD{ "\033[1;32;49m" };
 const std::string TEXT_STYLE_BLUE_ON_DEFAULT_BOLD{ "\033[1;34;49m" };
+const std::string TEXT_STYLE_RED_ON_DEFAULT_BOLD{ "\033[1;31;49m" };
+const std::string TEXT_STYLE_YELLOW_ON_DEFAULT_BOLD{ "\033[1;33;49m" };
+const std::string TEXT_STYLE_CYAN_ON_DEFAULT_BOLD{ "\033[1;36;49m" };
 
 struct Command
 {
@@ -54,6 +59,8 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordListOut);
 void PrintCommand(const Command& command);
 void PrintWordList(const std::vector<std::string>& wordList);
+void GetUser(std::string& userOut);
+void GetHomeDirectory(std::string& homeOut);
 void GetWorkingDirectory(std::string& pathOut);
 
 //+------------------------\----------------------------------
@@ -135,49 +142,42 @@ void ExecuteCommand(const Command& command)
 }
 void ChangeWorkingDirectory(const std::string& directory)
 {
-	// If no directory specified, change to root directory
 	std::string finalDirectory;
 	if(directory.empty())
+	{
+		// If no directory specified, change to root directory
 		finalDirectory = "/";
-
-	// If first char is ~ expand it to home directory
+	}
 	else if(directory[0] == '~')
 	{
-		// Try to get home directory
-		char* home{ getenv("HOME") };
-
-		// If home directory does not exist, bail
-		if(!home)
+		// Expand ~ to home directory (bail if we can't find it)
+		GetHomeDirectory(finalDirectory);
+		if(finalDirectory.empty())
 		{
-			std::cerr << SHELL_NAME << ": cd: ~: Failed to find home directory" << std::endl;
+			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": ~: Failed to find home directory" << std::endl;
 			return;
 		}
 
-		// Put directory string together
-		finalDirectory = home;
+		// Add the remaining subdirectories
 		if(directory.size() > 1)
 			finalDirectory += directory.substr(1, directory.length() - 1);
 	}
-
-	// Unmodified directory
 	else
 		finalDirectory = directory;
 
 	// Change working directory (while retaining current working directory for cdl command)
 	std::string savedWorkingDirectory;
 	GetWorkingDirectory(savedWorkingDirectory);
-	bool error;
 	errno = 0;
-	error = chdir(finalDirectory.c_str());
-	if(error)
+	if(!chdir(finalDirectory.c_str()))
 	{
-		std::string message{ SHELL_NAME + ": cd: \'" + finalDirectory + "\'" };
-		perror(message.c_str());
+		// Overwrite last directory if we successfully changed directories.
+		lastWorkingDirectory = savedWorkingDirectory;
 	}
 	else
 	{
-		// Only overwrite last directory if we successfully changed directories.
-		lastWorkingDirectory = savedWorkingDirectory;
+		std::string message{ SHELL_NAME + ": " + CHANGE_DIRECTORY_COMMAND + ": \'" + finalDirectory + "\'" };
+		perror(message.c_str());
 	}
 }
 void ExecuteExternalApp(const Command& command)
@@ -260,12 +260,26 @@ void ClearTerminal()
 }
 void PrintPrompt()
 {
-	std::string workingDirectoryString;
-	GetWorkingDirectory(workingDirectoryString);
-	std::cout << TEXT_STYLE_GREEN_ON_DEFAULT_BOLD << SHELL_NAME
-		<< TEXT_STYLE_DEFAULT << ':'
-		<< TEXT_STYLE_BLUE_ON_DEFAULT_BOLD << '~' << workingDirectoryString
-		<< TEXT_STYLE_DEFAULT << "$ ";
+	const std::string& shellStyle{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
+	const std::string& userStyle{ TEXT_STYLE_GREEN_ON_DEFAULT_BOLD };
+	const std::string& directoryStyle{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
+	const std::string& punctuationStyle{ TEXT_STYLE_DEFAULT };
+
+	std::cout << shellStyle << SHELL_NAME;
+	{
+		std::string user;
+		GetUser(user);
+		if(!user.empty())
+			std::cout << punctuationStyle << '(' << userStyle << user << punctuationStyle << ')';
+	}
+	std::cout << punctuationStyle << ':';
+	{
+		std::string workingDirectory;
+		GetWorkingDirectory(workingDirectory);
+
+		std::cout << directoryStyle << workingDirectory
+			<< punctuationStyle << "$ " << TEXT_STYLE_DEFAULT;
+	}
 }
 void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut)
 {
@@ -420,6 +434,22 @@ void PrintWordList(const std::vector<std::string>& wordList)
 			std::cout << ' ';
 	}
 }
+void GetUser(std::string& userOut)
+{
+	char* user{ getenv("USER") };
+	if(!user)
+		userOut.clear();
+	else
+		userOut = user;
+}
+void GetHomeDirectory(std::string& homeOut)
+{
+	char* home{ getenv("HOME") };
+	if(!home)
+		homeOut.clear();
+	else
+		homeOut = home;
+}
 void GetWorkingDirectory(std::string& pathOut)
 {
 	char cwd[256];
@@ -433,4 +463,5 @@ void GetWorkingDirectory(std::string& pathOut)
 	else
 		pathOut = cwd;
 }
+
 
