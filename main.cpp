@@ -10,19 +10,31 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-// Limit command inputLength to make sure SeparateIntoWords works correctly:
+// Limit command numChars to make sure SeparateIntoWords works correctly:
 //		std::string::size_type is converted to int, which is potentially a narrowing conversion.
 //		So we must put a limit on the value, but we could make this limit as high as INT_MAX if we wanted.
 //		If a different splitting algorithm was used without this conversion, this limit could be removed.
 const std::string::size_type MAX_COMMAND_LENGTH{ 1024 };
 
+// Separators
+const char WHITE_SPACE_CHAR_1{ ' ' };
+const char WHITE_SPACE_CHAR_2{ '\t' };
+const std::string COMMAND_SEPARATOR_1{ "&&" };
+const std::string COMMAND_SEPARATOR_2{ ";" };
+
+// Commands
+const std::string SHELL_NAME{ "lex" };
+const std::string QUIT_COMMAND_1{ "exit" };
+const std::string QUIT_COMMAND_2{ "quit" };
+const std::string CHANGE_DIRECTORY_COMMAND{ "cd" };
+const std::string CHANGE_TO_LAST_DIRECTORY_COMMAND{ "cdl" };
+
 // Console text formatting
-const std::string defaultStyle{ "\033[0m" };
-const std::string greenOnDefault{ "\033[0;32;49m" };
-const std::string blueOnDefault{ "\033[0;34;49m" };
-const std::string greenOnDefaultBold{ "\033[1;32;49m" };
-const std::string blueOnDefaultBold{ "\033[1;34;49m" };
-const std::string shellName{ "lex" };
+const std::string TEXT_STYLE_DEFAULT{ "\033[0m" };
+const std::string TEXT_STYLE_GREEN_ON_DEFAULT{ "\033[0;32;49m" };
+const std::string TEXT_STYLE_BLUE_ON_DEFAULT{ "\033[0;34;49m" };
+const std::string TEXT_STYLE_GREEN_ON_DEFAULT_BOLD{ "\033[1;32;49m" };
+const std::string TEXT_STYLE_BLUE_ON_DEFAULT_BOLD{ "\033[1;34;49m" };
 
 struct Command
 {
@@ -44,10 +56,11 @@ void ExecuteExternalApp(const Command& command);
 //\------------------------/----------------------------------
 void ClearTerminal();
 void PrintPrompt();
-void SeparateIntoCommand(const std::string& input, Command& commandOut);
+void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut);
+void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordListOut);
 void PrintCommand(const Command& command);
 void PrintWordList(const std::vector<std::string>& wordList);
-void GetWorkingDirectory(std::string& pathOutput);
+void GetWorkingDirectory(std::string& pathOut);
 
 //+------------------------\----------------------------------
 //|			 Main		   |
@@ -61,7 +74,7 @@ int main()
 	}
 	catch(const std::exception & e)
 	{
-		std::cerr << shellName << ": Fatal Exception: " << e.what() << std::endl;
+		std::cerr << SHELL_NAME << ": Fatal Exception: " << e.what() << std::endl;
 		return EXIT_FAILURE;
 	}
 	return EXIT_SUCCESS;
@@ -74,21 +87,29 @@ void DoShell()
 	{
 		PrintPrompt();
 
-		// Get input from command-line and format it into a command and arguments
-		Command currentCommand;
+		// Get list of commands from command-line
+		std::vector<Command> commandList;
 		{
-			std::string inputLine;
-			getline(std::cin, inputLine);
+			// Get line of input, and tokenize
+			std::vector<std::string> wordList;
+			{
+				std::string inputLine;
+				getline(std::cin, inputLine);
+				SeparateIntoWords(inputLine, wordList);
+			}
 
-			//************************************************  
-			//TODO: separate into list of commands separated by "&&" 
-			//************************************************
-			SeparateIntoCommand(inputLine, currentCommand);
+			// Convert to list of commands
+			SeparateIntoCommands(wordList, commandList);
 		}
-		if(currentCommand.name.empty())
-			continue;
 
-		ExecuteCommand(currentCommand);
+		// Execute list of commands
+		for(const Command& command : commandList)
+		{
+			if(command.name == QUIT_COMMAND_1 || command.name == QUIT_COMMAND_2)
+				return;
+
+			ExecuteCommand(command);
+		}
 	}
 }
 
@@ -97,28 +118,27 @@ void DoShell()
 //\------------------------/----------------------------------
 void ExecuteCommand(const Command& command)
 {
-	if(command.name == "exit")
+	if(command.name.empty())
 		return;
-	else if(command.name == "cd")
+	else if(command.name == CHANGE_DIRECTORY_COMMAND)
 	{
 		if(command.arguments.size() > 1)
-			std::cerr << shellName << ": cd: too many arguments" << std::endl;
+			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
 		else if(command.arguments.empty())
 			ChangeWorkingDirectory("");
 		else
 			ChangeWorkingDirectory(command.arguments[0]);
 	}
-	else if(command.name == "cdl")
+	else if(command.name == CHANGE_TO_LAST_DIRECTORY_COMMAND)
 	{
 		if(!command.arguments.empty())
-			std::cerr << shellName << ": cdl: too many arguments" << std::endl;
+			std::cerr << SHELL_NAME << ": " << CHANGE_TO_LAST_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
 		else
 			ChangeWorkingDirectory(lastWorkingDirectory);
 	}
 	else
 		ExecuteExternalApp(command);
 }
-
 void ChangeWorkingDirectory(const std::string& directory)
 {
 	// If no directory specified, change to root directory
@@ -135,7 +155,7 @@ void ChangeWorkingDirectory(const std::string& directory)
 		// If home directory does not exist, bail
 		if(!home)
 		{
-			std::cerr << shellName << ": cd: ~: Failed to find home directory" << std::endl;
+			std::cerr << SHELL_NAME << ": cd: ~: Failed to find home directory" << std::endl;
 			return;
 		}
 
@@ -157,7 +177,7 @@ void ChangeWorkingDirectory(const std::string& directory)
 	error = chdir(finalDirectory.c_str());
 	if(error)
 	{
-		std::string message{ shellName + ": cd: \'" + finalDirectory + "\'" };
+		std::string message{ SHELL_NAME + ": cd: \'" + finalDirectory + "\'" };
 		perror(message.c_str());
 	}
 	else
@@ -166,7 +186,6 @@ void ChangeWorkingDirectory(const std::string& directory)
 		lastWorkingDirectory = savedWorkingDirectory;
 	}
 }
-
 void ExecuteExternalApp(const Command& command)
 {
 	if(command.name.empty())
@@ -179,7 +198,7 @@ void ExecuteExternalApp(const Command& command)
 	// If fork failed, print error
 	if(child_pid < 0)
 	{
-		std::string message{ shellName + ": " + command.name };
+		std::string message{ SHELL_NAME + ": " + command.name };
 		perror(message.c_str());
 	}
 
@@ -217,7 +236,7 @@ void ExecuteExternalApp(const Command& command)
 		// If execvp failed, print error and terminate child process
 		if(result < 0)
 		{
-			std::string message{ shellName + ": " + command.name };
+			std::string message{ SHELL_NAME + ": " + command.name };
 			perror(message.c_str());
 			exit(EXIT_FAILURE);
 		}
@@ -230,7 +249,7 @@ void ExecuteExternalApp(const Command& command)
 		if(waitpid(child_pid, nullptr, WUNTRACED) < 0)
 		{
 			// Print error, if any
-			std::string message{ shellName + ": " + command.name };
+			std::string message{ SHELL_NAME + ": " + command.name };
 			perror(message.c_str());
 		}
 	}
@@ -249,12 +268,69 @@ void PrintPrompt()
 {
 	std::string workingDirectoryString;
 	GetWorkingDirectory(workingDirectoryString);
-	std::cout << greenOnDefaultBold << shellName
-		<< defaultStyle << ':'
-		<< blueOnDefaultBold << '~' << workingDirectoryString
-		<< defaultStyle << "$ ";
+	std::cout << TEXT_STYLE_GREEN_ON_DEFAULT_BOLD << SHELL_NAME
+		<< TEXT_STYLE_DEFAULT << ':'
+		<< TEXT_STYLE_BLUE_ON_DEFAULT_BOLD << '~' << workingDirectoryString
+		<< TEXT_STYLE_DEFAULT << "$ ";
 }
-void SeparateIntoCommand(const std::string& input, Command& commandOut)
+void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut)
+{
+	// Make sure output is empty
+	commandListOut.clear();
+
+	// Don't process empty input
+	if(wordList.empty())
+		return;
+
+	// Convert length to signed integer so that (currentWord - currentCommandStart + 1) works below
+	int numWords = (int)wordList.size();
+
+	// Go word by word, finding the start and end of each command, and making a list
+	for(int currentWord = 0, currentCommandStart = 0; currentWord < numWords; ++currentWord)
+	{
+		// If current word is command separator
+		if(wordList[currentWord] == COMMAND_SEPARATOR_1 || wordList[currentWord] == COMMAND_SEPARATOR_2)
+		{
+			// If current command has any words, record the command
+			if(currentWord > currentCommandStart)
+			{
+				// Record command name
+				Command command;
+				command.name = wordList[currentCommandStart];
+
+				// Record arguments, if any
+				for(int i = currentCommandStart + 1; i < currentWord; ++i)
+					command.arguments.push_back(wordList[i]);
+
+				// Record command
+				commandListOut.push_back(command);
+			}
+
+			// Next command needs to start on next word
+			currentCommandStart = currentWord + 1;
+		}
+
+		// If we are at the last word
+		if(currentWord == numWords - 1)
+		{
+			// If current command has any words, record the command
+			if(currentWord - currentCommandStart + 1 > 0)
+			{
+				// Record command name
+				Command command;
+				command.name = wordList[currentCommandStart];
+
+				// Record arguments, if any
+				for(int i = currentCommandStart + 1; i <= currentWord; ++i)
+					command.arguments.push_back(wordList[i]);
+
+				// Record command
+				commandListOut.push_back(command);
+			}
+		}
+	}
+}
+/*void SeparateIntoCommand(const std::string& input, Command& commandOut)
 {
 	// Make sure output is empty
 	commandOut.name.clear();
@@ -267,16 +343,16 @@ void SeparateIntoCommand(const std::string& input, Command& commandOut)
 	// Verify command is not too long
 	if(input.length() > MAX_COMMAND_LENGTH)
 	{
-		std::cerr << shellName << ": Exceeded maximum of " << MAX_COMMAND_LENGTH << " characters." << std::endl;
+		std::cerr << SHELL_NAME << ": Exceeded maximum of " << MAX_COMMAND_LENGTH << " characters." << std::endl;
 		return;
 	}
 
 	// Convert length to signed integer so that (currentChar - currentWordStart + 1) works below
-	int inputLength = (int)input.length();
+	int numChars = (int)input.length();
 
 	// Go char by char, finding the start and end of each word, and making a list
 	bool commandProcessed{ false };
-	for(int currentChar = 0, currentWordStart = 0; currentChar < inputLength; ++currentChar)
+	for(int currentChar = 0, currentWordStart = 0; currentChar < numChars; ++currentChar)
 	{
 		// If current character is whitespace
 		if(input[currentChar] == ' ' || input[currentChar] == '\t')
@@ -300,7 +376,7 @@ void SeparateIntoCommand(const std::string& input, Command& commandOut)
 		}
 
 		// If we are at the last character
-		if(currentChar == inputLength - 1)
+		if(currentChar == numChars - 1)
 		{
 			// If current word has any characters, record the word
 			int wordLength{ currentChar - currentWordStart + 1};
@@ -317,7 +393,50 @@ void SeparateIntoCommand(const std::string& input, Command& commandOut)
 			}
 		}
 	}
+}*/
+void SeparateIntoWords(const std::string& input, std::vector<std::string>& outputWordList)
+{
+	// Make sure output is empty
+	outputWordList.clear();
+
+	// Don't process empty input
+	if(input.empty())
+		return;
+
+	// Verify command is not too long
+	if(input.length() > MAX_COMMAND_LENGTH)
+	{
+		std::cerr << SHELL_NAME << ": Exceeded maximum of " << MAX_COMMAND_LENGTH << " characters." << std::endl;
+		return;
+	}
+
+	// Convert length to signed integer so that (currentChar - currentWordStart + 1) works below
+	int numChars = (int)input.length();
+
+	// Go char by char, finding the start and end of each word, and making a list
+	for(int currentChar = 0, currentWordStart = 0; currentChar < numChars; ++currentChar)
+	{
+		// If current character is whitespace
+		if(input[currentChar] == WHITE_SPACE_CHAR_1 || input[currentChar] == WHITE_SPACE_CHAR_2)
+		{
+			// If current word has any characters, record the word
+			if(currentChar > currentWordStart)
+				outputWordList.push_back(input.substr(currentWordStart, currentChar - currentWordStart));
+
+			// Next word needs to start on next character, any time a whitespace character is encountered, no matter if a word was recorded or not
+			currentWordStart = currentChar + 1;
+		}
+
+		// If we are at the last character
+		if(currentChar == numChars - 1)
+		{
+			// If current word has any characters, record the word
+			if(currentChar - currentWordStart + 1 > 0)
+				outputWordList.push_back(input.substr(currentWordStart, currentChar - currentWordStart + 1));
+		}
+	}
 }
+
 void PrintCommand(const Command& command)
 {
 	std::cout << command.name << ' ';
@@ -332,7 +451,7 @@ void PrintWordList(const std::vector<std::string>& wordList)
 			std::cout << ' ';
 	}
 }
-void GetWorkingDirectory(std::string& pathOutput)
+void GetWorkingDirectory(std::string& pathOut)
 {
 	char cwd[256];
 	char* result;
@@ -340,9 +459,9 @@ void GetWorkingDirectory(std::string& pathOutput)
 	if(!result)
 	{
 		perror("Failed to get current working directory");
-		pathOutput.clear();
+		pathOut.clear();
 	}
 	else
-		pathOutput = cwd;
+		pathOut = cwd;
 }
 
