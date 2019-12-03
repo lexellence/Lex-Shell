@@ -9,6 +9,8 @@
 #include <vector>
 #include <unistd.h>
 #include <sys/wait.h>
+//#include <ctype.h>
+//#include <cstdlib>
 
 // Separators
 const char WHITE_SPACE_CHAR_1{ ' ' };
@@ -22,6 +24,9 @@ const std::string QUIT_COMMAND_1{ "exit" };
 const std::string QUIT_COMMAND_2{ "quit" };
 const std::string CHANGE_DIRECTORY_COMMAND{ "cd" };
 const std::string CHANGE_TO_LAST_DIRECTORY_COMMAND{ "cdl" };
+const std::string DISPLAY_HISTORY_COMMAND{ "history" };
+const std::string EXECUTE_HISTORY_COMMAND{ "!" };
+const int MAX_HISTORY_SIZE{ 10 };
 
 // Console text formatting
 const std::string TEXT_STYLE_DEFAULT{ "\033[0m" };
@@ -42,11 +47,15 @@ struct Command
 };
 
 std::string lastWorkingDirectory;
+std::vector<Command> historyList;
 
 //+------------------------\----------------------------------
 //|		   Commands		   |
 //\------------------------/----------------------------------
 void ExecuteCommand(const Command& command);
+
+void ExecuteHistory(const Command& command);
+
 void ChangeWorkingDirectory(const std::string& directory);
 void ExecuteExternalApp(const Command& command);
 
@@ -59,6 +68,9 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordListOut);
 void PrintCommand(const Command& command);
 void PrintWordList(const std::vector<std::string>& wordList);
+
+void PrintHistory();
+
 void GetUser(std::string& userOut);
 void GetHomeDirectory(std::string& homeOut);
 void GetWorkingDirectory(std::string& pathOut);
@@ -121,7 +133,50 @@ void ExecuteCommand(const Command& command)
 {
 	if(command.name.empty())
 		return;
-	else if(command.name == CHANGE_DIRECTORY_COMMAND)
+
+	if(command.name == DISPLAY_HISTORY_COMMAND)
+	{
+		PrintHistory();
+		return;
+	}
+
+	if(command.name == EXECUTE_HISTORY_COMMAND)
+	{
+		if(command.arguments.size() > 1)
+			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": too many arguments" << std::endl;
+		else if(command.arguments.empty())
+			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": missing operand" << std::endl;
+		else
+		{
+			try
+			{
+				int historydigit = std::stoi(command.arguments[0]);
+				if(historydigit < 0 || historydigit > MAX_HISTORY_SIZE || 
+						(std::vector<Command>::size_type)historydigit > historyList.size() - 1)
+					std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": index out of range" << std::endl;
+				else
+				{
+					Command commandInHistory{ historyList[historydigit] };
+					historyList.erase(historyList.begin() + historydigit);
+					ExecuteCommand(commandInHistory);
+				}
+			}
+			catch(const std::logic_error & e)
+			{
+				std::cout << "Invalid arguments for history execution \n";
+			}
+			return;
+		}
+	}
+
+	// Record in history
+	historyList.push_back(command);
+
+	// Erase oldest entry if history is overflowing
+	if(historyList.size() > MAX_HISTORY_SIZE)
+		historyList.erase(historyList.begin());
+
+	if(command.name == CHANGE_DIRECTORY_COMMAND)
 	{
 		if(command.arguments.size() > 1)
 			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
@@ -329,70 +384,6 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 		}
 	}
 }
-/*void SeparateIntoCommand(const std::string& input, Command& commandOut)
-{
-	// Make sure output is empty
-	commandOut.name.clear();
-	commandOut.arguments.clear();
-
-	// Don't process empty input
-	if(input.empty())
-		return;
-
-	// Verify command is not too long
-	if(input.length() > MAX_COMMAND_LENGTH)
-	{
-		std::cerr << SHELL_NAME << ": Exceeded maximum of " << MAX_COMMAND_LENGTH << " characters." << std::endl;
-		return;
-	}
-
-	// Convert length to signed integer so that (currentChar - currentWordStart + 1) works below
-	int numChars = (int)input.length();
-
-	// Go char by char, finding the start and end of each word, and making a list
-	bool commandProcessed{ false };
-	for(int currentChar = 0, currentWordStart = 0; currentChar < numChars; ++currentChar)
-	{
-		// If current character is whitespace
-		if(input[currentChar] == ' ' || input[currentChar] == '\t')
-		{
-			// If current word has any characters, record the word
-			int wordLength{ currentChar - currentWordStart };
-			if(wordLength > 0)
-			{
-				// Separate command from args
-				if(!commandProcessed)
-				{
-					commandOut.name = input.substr(currentWordStart, wordLength);
-					commandProcessed = true;
-				}
-				else
-					commandOut.arguments.push_back(input.substr(currentWordStart, wordLength));
-			}
-
-			// Next word needs to start on next character, any time a whitespace character is encountered, no matter if a word was recorded or not
-			currentWordStart = currentChar + 1;
-		}
-
-		// If we are at the last character
-		if(currentChar == numChars - 1)
-		{
-			// If current word has any characters, record the word
-			int wordLength{ currentChar - currentWordStart + 1};
-			if(wordLength > 0)
-			{
-				// Separate command from args
-				if(!commandProcessed)
-				{
-					commandOut.name = input.substr(currentWordStart, wordLength);
-					commandProcessed = true;
-				}
-				else
-					commandOut.arguments.push_back(input.substr(currentWordStart, wordLength));
-			}
-		}
-	}
-}*/
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& outputWordList)
 {
 	// Go char by char, finding the start and end of each word, and making a list
@@ -434,6 +425,23 @@ void PrintWordList(const std::vector<std::string>& wordList)
 			std::cout << ' ';
 	}
 }
+void PrintHistory()
+{
+	if(historyList.empty()) 
+	{
+		std::cout << SHELL_NAME << ": History is empty" << std::endl;
+		return;
+	}
+
+	for(std::vector<Command>::size_type i = 0; i < historyList.size(); ++i)
+	{
+		std::cout << SHELL_NAME << ": ! " << i << ": " << historyList[i].name;
+		for(std::vector<std::string>::size_type k = 0; k < historyList[i].arguments.size(); k++)
+			std::cout << ' ' << historyList[i].arguments[k];
+		std::cout << std::endl;
+	}
+}
+
 void GetUser(std::string& userOut)
 {
 	char* user{ getenv("USER") };
@@ -457,7 +465,9 @@ void GetWorkingDirectory(std::string& pathOut)
 	result = getcwd(cwd, sizeof(cwd));
 	if(!result)
 	{
-		perror("Failed to get current working directory");
+		// Print error
+		std::string message{ SHELL_NAME + ": Failed to get current working directory" };
+		perror(message.c_str());
 		pathOut.clear();
 	}
 	else
