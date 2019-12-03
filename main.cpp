@@ -10,11 +10,14 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-// Separators
+// Operators/Separators
 const char WHITE_SPACE_CHAR_1{ ' ' };
 const char WHITE_SPACE_CHAR_2{ '\t' };
 const std::string COMMAND_SEPARATOR_1{ "&&" };
 const std::string COMMAND_SEPARATOR_2{ ";" };
+const std::string REDIRECT_OUTPUT_OPERATOR{ ">" };
+const std::string REDIRECT_OUTPUT_APPEND_OPERATOR{ ">>" };
+const std::string REDIRECT_INPUT_OPERATOR{ "<" };
 
 // Commands
 const std::string SHELL_NAME{ "lex" };
@@ -50,9 +53,9 @@ std::vector<Command> historyList;
 //+------------------------\----------------------------------
 //|		   Commands		   |
 //\------------------------/----------------------------------
-void ExecuteCommand(const Command& command);
-void ExecuteHistory(const Command& command);
-void ChangeWorkingDirectory(const std::string& directory);
+void ExecuteCommand(const Command& command, const std::string& outputFilename = "", bool append = false,
+	const std::string& inputFilename = "");
+void ChangeWorkingDirectory(std::string directory);
 void ExecuteExternalApp(const Command& command);
 
 //+------------------------\----------------------------------
@@ -66,6 +69,7 @@ void PrintCommand(const Command& command);
 void PrintWordList(const std::vector<std::string>& wordList);
 void PrintHistory();
 void GetUser(std::string& userOut);
+void ExpandDirectory(std::string& directory);
 void GetHomeDirectory(std::string& homeOut);
 void GetWorkingDirectory(std::string& pathOut);
 
@@ -123,7 +127,8 @@ void DoShell()
 //+------------------------\----------------------------------
 //|		   Commands		   |
 //\------------------------/----------------------------------
-void ExecuteCommand(const Command& command)
+void ExecuteCommand(const Command& command, const std::string& outputFilename, bool append, 
+					const std::string& inputFilename)
 {
 	if(command.name.empty())
 		return;
@@ -170,6 +175,14 @@ void ExecuteCommand(const Command& command)
 	if(historyList.size() > MAX_HISTORY_SIZE)
 		historyList.erase(historyList.begin());
 
+	//*******************************
+	// TODO: REDIRECTION
+	//*******************************
+	/*if(command.arguments.size() >= 2)
+	{
+		if(command.arguments.)
+	}*/
+
 	if(command.name == CHANGE_DIRECTORY_COMMAND)
 	{
 		if(command.arguments.size() > 1)
@@ -189,43 +202,23 @@ void ExecuteCommand(const Command& command)
 	else
 		ExecuteExternalApp(command);
 }
-void ChangeWorkingDirectory(const std::string& directory)
+void ChangeWorkingDirectory(std::string directory)
 {
-	std::string finalDirectory;
-	if(directory.empty())
-	{
-		// If no directory specified, change to root directory
-		finalDirectory = "/";
-	}
-	else if(directory[0] == '~')
-	{
-		// Expand ~ to home directory (bail if we can't find it)
-		GetHomeDirectory(finalDirectory);
-		if(finalDirectory.empty())
-		{
-			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": ~: Failed to find home directory" << std::endl;
-			return;
-		}
-
-		// Add the remaining subdirectories
-		if(directory.size() > 1)
-			finalDirectory += directory.substr(1, directory.length() - 1);
-	}
-	else
-		finalDirectory = directory;
-
-	// Change working directory (while retaining current working directory for cdl command)
+	// Retain current working directory for cdl command
 	std::string savedWorkingDirectory;
 	GetWorkingDirectory(savedWorkingDirectory);
+
+	// Change directories
+	ExpandDirectory(directory);
 	errno = 0;
-	if(!chdir(finalDirectory.c_str()))
+	if(!chdir(directory.c_str()))
 	{
 		// Overwrite last directory if we successfully changed directories.
 		lastWorkingDirectory = savedWorkingDirectory;
 	}
 	else
 	{
-		std::string message{ SHELL_NAME + ": " + CHANGE_DIRECTORY_COMMAND + ": \'" + finalDirectory + "\'" };
+		std::string message{ SHELL_NAME + ": " + CHANGE_DIRECTORY_COMMAND + ": \'" + directory + "\'" };
 		perror(message.c_str());
 	}
 }
@@ -443,6 +436,27 @@ void GetUser(std::string& userOut)
 		userOut.clear();
 	else
 		userOut = user;
+}
+void ExpandDirectory(std::string& directory)
+{
+	std::string expandedDirectory;
+	if(directory.empty())
+	{
+		// If no directory specified, change to root directory
+		expandedDirectory = "/";
+	}
+	else if(directory[0] == '~')
+	{
+		// Expand ~ to home directory (if we can find it)
+		GetHomeDirectory(expandedDirectory);
+		if(expandedDirectory.empty())
+			std::cerr << SHELL_NAME << ": ~: Failed to find home directory" << std::endl;
+
+		// Add the remaining subdirectories
+		if(directory.size() > 1)
+			expandedDirectory += directory.substr(1, directory.length() - 1);
+	}
+	directory = expandedDirectory;
 }
 void GetHomeDirectory(std::string& homeOut)
 {
