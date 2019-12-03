@@ -9,8 +9,6 @@
 #include <vector>
 #include <unistd.h>
 #include <sys/wait.h>
-//#include <ctype.h>
-//#include <cstdlib>
 
 // Separators
 const char WHITE_SPACE_CHAR_1{ ' ' };
@@ -53,9 +51,7 @@ std::vector<Command> historyList;
 //|		   Commands		   |
 //\------------------------/----------------------------------
 void ExecuteCommand(const Command& command);
-
 void ExecuteHistory(const Command& command);
-
 void ChangeWorkingDirectory(const std::string& directory);
 void ExecuteExternalApp(const Command& command);
 
@@ -68,9 +64,7 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordListOut);
 void PrintCommand(const Command& command);
 void PrintWordList(const std::vector<std::string>& wordList);
-
 void PrintHistory();
-
 void GetUser(std::string& userOut);
 void GetHomeDirectory(std::string& homeOut);
 void GetWorkingDirectory(std::string& pathOut);
@@ -165,8 +159,8 @@ void ExecuteCommand(const Command& command)
 			{
 				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid operand" << std::endl;
 			}
-			return;
 		}
+		return;
 	}
 
 	// Record in history
