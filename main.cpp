@@ -163,7 +163,7 @@ void ExecuteCommand(const Command& command)
 			}
 			catch(const std::logic_error & e)
 			{
-				std::cout << "Invalid arguments for history execution \n";
+				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid operand" << std::endl;
 			}
 			return;
 		}
