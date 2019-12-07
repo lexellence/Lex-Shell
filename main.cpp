@@ -7,6 +7,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <list>
+#include <algorithm>
+#include <memory>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -27,7 +30,6 @@ const std::string CHANGE_DIRECTORY_COMMAND{ "cd" };
 const std::string CHANGE_TO_LAST_DIRECTORY_COMMAND{ "cdl" };
 const std::string DISPLAY_HISTORY_COMMAND{ "history" };
 const std::string EXECUTE_HISTORY_COMMAND{ "!" };
-const int MAX_HISTORY_SIZE{ 10 };
 
 // Console text formatting
 const std::string TEXT_STYLE_DEFAULT{ "\033[0m" };
@@ -45,10 +47,84 @@ struct Command
 {
 	std::string name;
 	std::vector<std::string> arguments;
+
+	bool operator==(const Command& other) const
+	{
+		if(name != other.name)
+			return false;
+		if(arguments != other.arguments)
+			return false;
+		return true;
+	}
+	bool operator!=(const Command& other) const
+	{
+		return !(*this == other);
+	}
+};
+class ExecutedCommand
+{
+public:
+	ExecutedCommand(std::list<Command>::iterator newHistoryIter, std::list<Command>& newCommandListRef)
+		: m_isHistory{ true },
+		m_historyIter{ newHistoryIter },
+		m_commandListRef{ newCommandListRef }{ }
+	ExecutedCommand(const Command& newCommand, std::list<Command>& newCommandListRef)
+		: m_isHistory{ false },
+		m_command{ newCommand },
+		m_commandListRef{ newCommandListRef }{ }
+	void MoveToFront() const
+	{
+		if(m_isHistory)
+			m_commandListRef.splice(m_commandListRef.begin(), m_commandListRef, m_historyIter);
+		else
+			m_commandListRef.push_front(m_command);
+	}
+	bool operator==(const ExecutedCommand& other) const
+	{
+		if(m_isHistory != other.m_isHistory)
+			return false;
+		if(m_commandListRef != other.m_commandListRef)
+			return false;
+		if(m_isHistory)
+		{
+			if(m_historyIter == other.m_historyIter)
+				return true;
+			else
+				return false;
+		}
+		else
+		{
+			if(m_command == other.m_command)
+				return true;
+			else
+				return false;
+		}
+	}
+	bool operator!=(const ExecutedCommand& other) const 
+	{
+		return !(*this == other);
+	}
+
+private:
+	bool m_isHistory;
+	std::list<Command>::iterator m_historyIter;
+	Command m_command;
+	std::list<Command>& m_commandListRef;
 };
 
+// Supports cdl command
 std::string lastWorkingDirectory;
-std::vector<Command> historyList;
+
+// This is small so the terminal doesn't get flooded
+const std::list<Command>::size_type MAX_HISTORY_SIZE{ 10u };
+
+// Front represents most recent command; this is persistent
+std::list<Command> historyList;
+
+// Back represents most recent command; this gets used and cleared between every user entry
+std::list<ExecutedCommand> executedCommandList;
+
+//std::list< std::list<Command>::iterator > historyCommandsExecutedList;
 
 //+------------------------\----------------------------------
 //|		   Commands		   |
@@ -122,6 +198,22 @@ void DoShell()
 
 			ExecuteCommand(command);
 		}
+
+		// Move/add executed commands to front
+		for(const ExecutedCommand& ec : executedCommandList)
+			ec.MoveToFront();
+		executedCommandList.clear();
+		
+		
+		// Erase oldest entries if history is overflowing
+		if(historyList.size() > MAX_HISTORY_SIZE)
+		{
+			std::list<Command>::iterator rangeStart{ historyList.begin() };
+			std::advance(rangeStart, MAX_HISTORY_SIZE);
+
+			historyList.erase(rangeStart, historyList.end());
+		}
+		
 	}
 }
 
@@ -141,6 +233,11 @@ void ExecuteCommand(const Command& command,
 		return;
 	}
 
+	// Set default new, non-history command
+	std::unique_ptr<ExecutedCommand> newExecutedCommandPtr = std::make_unique<ExecutedCommand>(command, historyList);
+	const Command* commandToExecutePtr{ &command };
+
+	// If history execution command, reset previous two variables accordingly
 	if(command.name == EXECUTE_HISTORY_COMMAND)
 	{
 		if(command.arguments.size() > 1)
@@ -151,91 +248,59 @@ void ExecuteCommand(const Command& command,
 		{
 			try
 			{
-				int historydigit = std::stoi(command.arguments[0]);
-				if(historydigit < 0 || historydigit > MAX_HISTORY_SIZE || 
-						(std::vector<Command>::size_type)historydigit > historyList.size() - 1)
+				// Convert index from string to number and range check
+				std::list<Command>::size_type historyIndex{ std::stoul(command.arguments[0]) };
+				if(historyIndex > MAX_HISTORY_SIZE || historyIndex >= historyList.size())
+				{
 					std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": index out of range" << std::endl;
+					return;
+				}
 				else
 				{
-					Command commandInHistory{ historyList[historydigit] };
-					historyList.erase(historyList.begin() + historydigit);
-					ExecuteCommand(commandInHistory);
+					// Get iterator at index
+					std::list<Command>::iterator commandIter{ historyList.begin() };
+					std::advance(commandIter, historyIndex);
+
+					// Setup command in history for execution
+					newExecutedCommandPtr = std::make_unique<ExecutedCommand>(commandIter, historyList);
+					commandToExecutePtr = &*commandIter;
 				}
 			}
 			catch(const std::logic_error & e)
 			{
 				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid operand" << std::endl;
+				return;
 			}
 		}
-		return;
 	}
 
-	// Record in history
-	historyList.push_back(command);
+	// Add new executed command or move existing executed command to back
+	auto executedCommandIter = std::find(executedCommandList.begin(), executedCommandList.end(), *newExecutedCommandPtr);
+	if(executedCommandIter != executedCommandList.end())
+		executedCommandList.splice(executedCommandList.end(), executedCommandList, executedCommandIter);
+	else
+		executedCommandList.push_back(*newExecutedCommandPtr);
 
-	// Erase oldest entry if history is overflowing
-	if(historyList.size() > MAX_HISTORY_SIZE)
-		historyList.erase(historyList.begin());
-
-	if(command.name == CHANGE_DIRECTORY_COMMAND)
+	if(commandToExecutePtr->name == CHANGE_DIRECTORY_COMMAND)
 	{
-		if(command.arguments.size() > 1)
+		if(commandToExecutePtr->arguments.size() > 1)
 			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
-		else if(command.arguments.empty())
+		else if(commandToExecutePtr->arguments.empty())
 			ChangeWorkingDirectory("");
 		else
-			ChangeWorkingDirectory(command.arguments[0]);
+			ChangeWorkingDirectory(commandToExecutePtr->arguments[0]);
 	}
-	else if(command.name == CHANGE_TO_LAST_DIRECTORY_COMMAND)
+	else if(commandToExecutePtr->name == CHANGE_TO_LAST_DIRECTORY_COMMAND)
 	{
-		if(!command.arguments.empty())
+		if(!commandToExecutePtr->arguments.empty())
 			std::cerr << SHELL_NAME << ": " << CHANGE_TO_LAST_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
 		else
 			ChangeWorkingDirectory(lastWorkingDirectory);
 	}
 	else
-		ExecuteExternalApp(command);
+		ExecuteExternalApp(*commandToExecutePtr);
 }
-/*void ChangeWorkingDirectory(const std::string& directory)
-{
-	std::string finalDirectory;
-	if(directory.empty())
-	{
-		// If no directory specified, change to root directory
-		finalDirectory = "/";
-	}
-	else if(directory[0] == '~')
-	{
-		// Expand ~ to home directory (bail if we can't find it)
-		GetHomeDirectory(finalDirectory);
-		if(finalDirectory.empty())
-		{
-			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": ~: Failed to find home directory" << std::endl;
-			return;
-		}
 
-		// Add the remaining subdirectories
-		if(directory.size() > 1)
-			finalDirectory += directory.substr(1, directory.length() - 1);
-	}
-	else
-		finalDirectory = directory;
-
-	// Change working directory (while retaining current working directory for cdl command)
-	std::string savedWorkingDirectory;
-	GetWorkingDirectory(savedWorkingDirectory);
-	errno = 0;
-	if(!chdir(finalDirectory.c_str()))
-	{
-		// Overwrite last directory if we successfully changed directories.
-		lastWorkingDirectory = savedWorkingDirectory;
-	}
-	else
-	{
-		std::string message{ SHELL_NAME + ": " + CHANGE_DIRECTORY_COMMAND + ": \'" + finalDirectory + "\'" };
-		perror(message.c_str());
-	}
-}*/
 void ChangeWorkingDirectory(std::string directory)
 {
 	// Retain current working directory for cdl command
@@ -451,15 +516,16 @@ void PrintHistory()
 {
 	if(historyList.empty()) 
 	{
-		std::cout << SHELL_NAME << ": History is empty" << std::endl;
+		std::cout << SHELL_NAME << ": " << DISPLAY_HISTORY_COMMAND << ": empty" << std::endl;
 		return;
 	}
 
-	for(std::vector<Command>::size_type i = 0; i < historyList.size(); ++i)
+	// Print history list in reverse so that most recent command is printed last
+	std::list<Command>::size_type i{ historyList.size() - 1 };
+	for(auto commandIter = historyList.rbegin(); commandIter != historyList.rend(); ++commandIter, --i)
 	{
-		std::cout << SHELL_NAME << ": ! " << i << ": " << historyList[i].name;
-		for(std::vector<std::string>::size_type k = 0; k < historyList[i].arguments.size(); k++)
-			std::cout << ' ' << historyList[i].arguments[k];
+		std::cout << SHELL_NAME << ": ! " << i << ": ";
+		PrintCommand(*commandIter);
 		std::cout << std::endl;
 	}
 }
