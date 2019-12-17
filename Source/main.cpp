@@ -43,10 +43,20 @@ const std::string TEXT_STYLE_RED_ON_DEFAULT_BOLD{ "\033[1;31;49m" };
 const std::string TEXT_STYLE_YELLOW_ON_DEFAULT_BOLD{ "\033[1;33;49m" };
 const std::string TEXT_STYLE_CYAN_ON_DEFAULT_BOLD{ "\033[1;36;49m" };
 
+// Prompt styles
+const std::string& SHELL_STYLE{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
+const std::string& USER_STYLE{ TEXT_STYLE_GREEN_ON_DEFAULT_BOLD };
+const std::string& DIRECTORY_STYLE{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
+const std::string& PUNCUATION_STYLE{ TEXT_STYLE_DEFAULT };
+
+void PrintWordList(const std::vector<std::string>& wordList);
 struct Command
 {
 	std::string name;
 	std::vector<std::string> arguments;
+	//std::string inputFilename;
+	//std::string outputFilename;
+	//bool outputAppend;
 
 	bool operator==(const Command& other) const
 	{
@@ -56,82 +66,93 @@ struct Command
 			return false;
 		return true;
 	}
-	bool operator!=(const Command& other) const
+	friend std::ostream& operator<<(std::ostream& os, const Command& cmd)
 	{
-		return !(*this == other);
+		os << cmd.name << ' ';
+		PrintWordList(cmd.arguments);
+		return os;
 	}
 };
-class ExecutedCommand
+
+using CommandListIndex = std::list<Command>::size_type;
+class CommandList
 {
 public:
-	ExecutedCommand(std::list<Command>::iterator newHistoryIter, std::list<Command>& newCommandListRef)
-		: m_isHistory{ true },
-		m_historyIter{ newHistoryIter },
-		m_commandListRef{ newCommandListRef }{ }
-	ExecutedCommand(const Command& newCommand, std::list<Command>& newCommandListRef)
-		: m_isHistory{ false },
-		m_command{ newCommand },
-		m_commandListRef{ newCommandListRef }{ }
-	void MoveToFront() const
+	CommandList() = delete;
+	CommandList(unsigned maxCommands)
+		:m_maxCommands{ maxCommands } { }
+	const Command* GetCommandPtr(const std::string& indexString) const
 	{
-		if(m_isHistory)
-			m_commandListRef.splice(m_commandListRef.begin(), m_commandListRef, m_historyIter);
-		else
-			m_commandListRef.push_front(m_command);
+		try { 
+			return GetCommandPtr(std::stoul(indexString));
+		}
+		catch(const std::logic_error& e) { 
+			return nullptr; 
+		}
 	}
-	bool operator==(const ExecutedCommand& other) const
+	const Command* GetCommandPtr(CommandListIndex index) const
 	{
-		if(m_isHistory != other.m_isHistory)
-			return false;
-		if(m_commandListRef != other.m_commandListRef)
-			return false;
-		if(m_isHistory)
+		if(index >= m_commandList.size())
+			return nullptr;
+		else if(index == m_commandList.size() - 1)
+			return &m_commandList.back();
+		else if(index == 0)
+			return &m_commandList.front();
+		else
 		{
-			if(m_historyIter == other.m_historyIter)
-				return true;
-			else
-				return false;
+			auto it{ m_commandList.begin() };
+			std::advance(it, index);
+			return &*it;
+		}
+	}	
+	const std::list<Command>& GetList() const
+	{
+		return m_commandList;
+	}
+	void Add(const Command& newCommand)
+	{
+		auto foundCommandIter{ std::find(m_commandList.begin(), m_commandList.end(), newCommand) };
+		if(foundCommandIter != m_commandList.end())
+		{
+			if(foundCommandIter != m_commandList.begin())
+				m_commandList.splice(m_commandList.begin(), m_commandList, foundCommandIter);
 		}
 		else
 		{
-			if(m_command == other.m_command)
-				return true;
-			else
-				return false;
+			m_commandList.push_front(newCommand);
+			
+			// Trim
+			while(m_commandList.size() > m_maxCommands)
+				m_commandList.pop_back();
 		}
 	}
-	bool operator!=(const ExecutedCommand& other) const 
+	void Add(const CommandList& sourceList)
 	{
-		return !(*this == other);
+		for(auto sourceIter{ sourceList.m_commandList.rbegin() }; sourceIter != sourceList.m_commandList.rend(); ++sourceIter)
+			Add(*sourceIter);
 	}
-
+	void Clear()
+	{
+		m_commandList.clear();
+	}
+	
 private:
-	bool m_isHistory;
-	std::list<Command>::iterator m_historyIter;
-	Command m_command;
-	std::list<Command>& m_commandListRef;
+	std::list<Command> m_commandList;
+	CommandListIndex m_maxCommands;
 };
-
 // Supports cdl command
 std::string lastWorkingDirectory;
 
-// This is small so the terminal doesn't get flooded
-const std::list<Command>::size_type MAX_HISTORY_SIZE{ 10u };
+// This is persistent between user entries
+CommandList historyList{ 10 };
 
-// Front represents most recent command; this is persistent
-std::list<Command> historyList;
-
-// Back represents most recent command; this gets used and cleared between every user entry
-std::list<ExecutedCommand> executedCommandList;
-
-//std::list< std::list<Command>::iterator > historyCommandsExecutedList;
+// This gets added to history and cleared for each user entry
+CommandList executedCommandList{ 1000 };
 
 //+------------------------\----------------------------------
 //|		   Commands		   |
 //\------------------------/----------------------------------
-void ExecuteCommand(const Command& command, 
-	const std::string& inputFilename = "",
-	const std::string& outputFilename = "", bool append = false);
+void ExecuteCommand(const Command& command);
 void ChangeWorkingDirectory(std::string directory);
 void ExecuteExternalApp(const Command& command);
 
@@ -142,8 +163,6 @@ void ClearTerminal();
 void PrintPrompt();
 void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut);
 void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordListOut);
-void PrintCommand(const Command& command);
-void PrintWordList(const std::vector<std::string>& wordList);
 void PrintHistory();
 void GetUser(std::string& userOut);
 void ExpandDirectory(std::string& directory);
@@ -176,7 +195,7 @@ void DoShell()
 		PrintPrompt();
 
 		// Get list of commands from command-line
-		std::vector<Command> commandList;
+		std::vector<Command> commands;
 		{
 			// Get line of input, and tokenize
 			std::vector<std::string> wordList;
@@ -187,42 +206,28 @@ void DoShell()
 			}
 
 			// Convert to list of commands
-			SeparateIntoCommands(wordList, commandList);
+			SeparateIntoCommands(wordList, commands);
 		}
 
 		// Execute list of commands
-		for(const Command& command : commandList)
+		for(Command cmd : commands)
 		{
-			if(command.name == QUIT_COMMAND_1 || command.name == QUIT_COMMAND_2)
+			if(cmd.name == QUIT_COMMAND_1 || cmd.name == QUIT_COMMAND_2)
 				return;
 
-			ExecuteCommand(command);
+			ExecuteCommand(cmd);
 		}
 
-		// Move/add executed commands to front
-		for(const ExecutedCommand& ec : executedCommandList)
-			ec.MoveToFront();
-		executedCommandList.clear();
-		
-		
-		// Erase oldest entries if history is overflowing
-		if(historyList.size() > MAX_HISTORY_SIZE)
-		{
-			std::list<Command>::iterator rangeStart{ historyList.begin() };
-			std::advance(rangeStart, MAX_HISTORY_SIZE);
-
-			historyList.erase(rangeStart, historyList.end());
-		}
-		
+		// Record in history
+		historyList.Add(executedCommandList);
+		executedCommandList.Clear();
 	}
 }
 
 //+------------------------\----------------------------------
 //|		   Commands		   |
 //\------------------------/----------------------------------
-void ExecuteCommand(const Command& command,
-	const std::string& inputFilename,
-	const std::string& outputFilename, bool append)
+void ExecuteCommand(const Command& command)
 {
 	if(command.name.empty())
 		return;
@@ -233,54 +238,35 @@ void ExecuteCommand(const Command& command,
 		return;
 	}
 
-	// Set default new, non-history command
-	std::unique_ptr<ExecutedCommand> newExecutedCommandPtr = std::make_unique<ExecutedCommand>(command, historyList);
+	// Point commandToExecutePtr to either input or entry in history
 	const Command* commandToExecutePtr{ &command };
-
-	// If history execution command, reset previous two variables accordingly
 	if(command.name == EXECUTE_HISTORY_COMMAND)
 	{
 		if(command.arguments.size() > 1)
+		{
 			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": too many arguments" << std::endl;
+			return;
+		}
 		else if(command.arguments.empty())
+		{
 			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": missing operand" << std::endl;
+			return;
+		}
 		else
 		{
-			try
+			commandToExecutePtr = historyList.GetCommandPtr(command.arguments[0]);
+			if(!commandToExecutePtr)
 			{
-				// Convert index from string to number and range check
-				std::list<Command>::size_type historyIndex{ std::stoul(command.arguments[0]) };
-				if(historyIndex > MAX_HISTORY_SIZE || historyIndex >= historyList.size())
-				{
-					std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": index out of range" << std::endl;
-					return;
-				}
-				else
-				{
-					// Get iterator at index
-					std::list<Command>::iterator commandIter{ historyList.begin() };
-					std::advance(commandIter, historyIndex);
-
-					// Setup command in history for execution
-					newExecutedCommandPtr = std::make_unique<ExecutedCommand>(commandIter, historyList);
-					commandToExecutePtr = &*commandIter;
-				}
-			}
-			catch(const std::logic_error & e)
-			{
-				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid operand" << std::endl;
+				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid index" << std::endl;
 				return;
 			}
 		}
 	}
 
-	// Add new executed command or move existing executed command to back
-	auto executedCommandIter = std::find(executedCommandList.begin(), executedCommandList.end(), *newExecutedCommandPtr);
-	if(executedCommandIter != executedCommandList.end())
-		executedCommandList.splice(executedCommandList.end(), executedCommandList, executedCommandIter);
-	else
-		executedCommandList.push_back(*newExecutedCommandPtr);
+	// Record command
+	executedCommandList.Add(*commandToExecutePtr);
 
+	// Execute command
 	if(commandToExecutePtr->name == CHANGE_DIRECTORY_COMMAND)
 	{
 		if(commandToExecutePtr->arguments.size() > 1)
@@ -402,31 +388,26 @@ void ClearTerminal()
 }
 void PrintPrompt()
 {
-	const std::string& shellStyle{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
-	const std::string& userStyle{ TEXT_STYLE_GREEN_ON_DEFAULT_BOLD };
-	const std::string& directoryStyle{ TEXT_STYLE_BLUE_ON_DEFAULT_BOLD };
-	const std::string& punctuationStyle{ TEXT_STYLE_DEFAULT };
-
-	std::cout << shellStyle << SHELL_NAME;
+	std::cout << SHELL_STYLE << SHELL_NAME;
 	{
 		std::string user;
 		GetUser(user);
 		if(!user.empty())
-			std::cout << punctuationStyle << '(' << userStyle << user << punctuationStyle << ')';
+			std::cout << PUNCUATION_STYLE << '(' << USER_STYLE << user << PUNCUATION_STYLE << ')';
 	}
-	std::cout << punctuationStyle << ':';
+	std::cout << PUNCUATION_STYLE << ':';
 	{
 		std::string workingDirectory;
 		GetWorkingDirectory(workingDirectory);
 
-		std::cout << directoryStyle << workingDirectory
-			<< punctuationStyle << "$ " << TEXT_STYLE_DEFAULT;
+		std::cout << DIRECTORY_STYLE << workingDirectory
+			<< PUNCUATION_STYLE << "$ " << TEXT_STYLE_DEFAULT;
 	}
 }
-void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut)
+void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandsOut)
 {
 	// Go word by word, finding the start and end of each command, and making a list
-	commandListOut.clear();
+	commandsOut.clear();
 	for(std::vector<std::string>::size_type currentWord = 0, currentCommandStart = 0; currentWord < wordList.size(); ++currentWord)
 	{
 		// If current word is command separator
@@ -444,7 +425,7 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 					command.arguments.push_back(wordList[i]);
 
 				// Record command
-				commandListOut.push_back(command);
+				commandsOut.push_back(command);
 			}
 
 			// Next command needs to start on next word
@@ -466,15 +447,15 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 					command.arguments.push_back(wordList[i]);
 
 				// Record command
-				commandListOut.push_back(command);
+				commandsOut.push_back(command);
 			}
 		}
 	}
 }
-void SeparateIntoWords(const std::string& input, std::vector<std::string>& outputWordList)
+void SeparateIntoWords(const std::string& input, std::vector<std::string>& wordsOut)
 {
 	// Go char by char, finding the start and end of each word, and making a list
-	outputWordList.clear();
+	wordsOut.clear();
 	for(std::string::size_type currentChar = 0, currentWordStart = 0; currentChar < input.size(); ++currentChar)
 	{
 		// If current character is whitespace
@@ -482,7 +463,7 @@ void SeparateIntoWords(const std::string& input, std::vector<std::string>& outpu
 		{
 			// If current word has any characters, record the word
 			if(currentChar > currentWordStart)
-				outputWordList.push_back(input.substr(currentWordStart, currentChar - currentWordStart));
+				wordsOut.push_back(input.substr(currentWordStart, currentChar - currentWordStart));
 
 			// Next word needs to start on next character, any time a whitespace character is encountered, no matter if a word was recorded or not
 			currentWordStart = currentChar + 1;
@@ -493,15 +474,9 @@ void SeparateIntoWords(const std::string& input, std::vector<std::string>& outpu
 		{
 			// If current word has any characters, record the word
 			if(currentChar + 1 > currentWordStart)
-				outputWordList.push_back(input.substr(currentWordStart, (currentChar + 1) - currentWordStart));
+				wordsOut.push_back(input.substr(currentWordStart, (currentChar + 1) - currentWordStart));
 		}
 	}
-}
-
-void PrintCommand(const Command& command)
-{
-	std::cout << command.name << ' ';
-	PrintWordList(command.arguments);
 }
 void PrintWordList(const std::vector<std::string>& wordList)
 {
@@ -514,20 +489,17 @@ void PrintWordList(const std::vector<std::string>& wordList)
 }
 void PrintHistory()
 {
-	if(historyList.empty()) 
+	// Print history list in reverse so that most recent command is printed last
+	const std::list<Command>& cmdList{ historyList.GetList() };
+	if(cmdList.empty())
 	{
 		std::cout << SHELL_NAME << ": " << DISPLAY_HISTORY_COMMAND << ": empty" << std::endl;
 		return;
 	}
 
-	// Print history list in reverse so that most recent command is printed last
-	std::list<Command>::size_type i{ historyList.size() - 1 };
-	for(auto commandIter = historyList.rbegin(); commandIter != historyList.rend(); ++commandIter, --i)
-	{
-		std::cout << SHELL_NAME << ": ! " << i << ": ";
-		PrintCommand(*commandIter);
-		std::cout << std::endl;
-	}
+	CommandListIndex i{ cmdList.size() - 1 };
+	for(auto cmdIter = cmdList.rbegin(); cmdIter != cmdList.rend(); ++cmdIter, --i)
+		std::cout << SHELL_NAME << ": ! " << i << ": " << *cmdIter << std::endl;
 }
 
 void GetUser(std::string& userOut)
