@@ -89,7 +89,6 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 //|		   Execute		   |
 //\------------------------/----------------------------------
 void ExecuteCommand(const Command& command);
-const Command* GetCommandPtr(const std::list<Command>& commandList, const std::string& indexStr);
 bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut);
 const Command* GetCommandPtr(const std::list<Command>& commandList, CommandListIndex index);
 void ExecuteExternalApp(const Command& command);
@@ -286,7 +285,12 @@ void ExecuteCommand(const Command& command)
 		}
 		else
 		{
-			commandToExecutePtr = GetCommandPtr(commandHistory, command.arguments[0]);
+			CommandListIndex input;
+			if(StringToCommandListIndex(command.arguments[0], input) && input != 0)
+				commandToExecutePtr = GetCommandPtr(commandHistory, input - 1);
+			else
+				commandToExecutePtr = nullptr;
+
 			if(!commandToExecutePtr)
 			{
 				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid parameter" << std::endl;
@@ -318,21 +322,10 @@ void ExecuteCommand(const Command& command)
 	else
 		ExecuteExternalApp(*commandToExecutePtr);
 }
-const Command* GetCommandPtr(const std::list<Command>& commandList, const std::string& indexStr)
-{
-	CommandListIndex index;
-	if(StringToCommandListIndex(indexStr, index))
-		return GetCommandPtr(commandList, index);
-	else
-		return nullptr;
-}
 bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut)
 {
 	try {
-		indexOut = std::stoul(stringIn);
-		if(indexOut < 1)
-			return false;
-		--indexOut;
+		indexOut = (CommandListIndex)std::stoul(stringIn);
 	}
 	catch(const std::logic_error& e) {
 		return false;
