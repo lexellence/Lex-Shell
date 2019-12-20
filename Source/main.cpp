@@ -74,7 +74,8 @@ std::string lastWorkingDirectory;
 
 // History
 using CommandListIndex = std::list<Command>::size_type;
-CommandListIndex HISTORY_MAX_SIZE{ 10 };
+CommandListIndex HISTORY_MAX_SIZE{ 1000 };
+CommandListIndex HISTORY_DEFAULT_DISPLAY_SIZE{ 10 };
 std::list<Command> commandHistory;
 std::list<Command> executedCommands;
 
@@ -89,6 +90,7 @@ void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<
 //\------------------------/----------------------------------
 void ExecuteCommand(const Command& command);
 const Command* GetCommandPtr(const std::list<Command>& commandList, const std::string& indexStr);
+bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut);
 const Command* GetCommandPtr(const std::list<Command>& commandList, CommandListIndex index);
 void ExecuteExternalApp(const Command& command);
 void AddUniqueCommandToFront(const Command& sourceCommand, std::list<Command>& destinationList);
@@ -107,10 +109,8 @@ void GetWorkingDirectory(std::string& pathOut);
 void ClearTerminal();
 void PrintPrompt();
 void GetUser(std::string& userOut);
-void PrintHistory();
+void PrintHistory(CommandListIndex numCommands);
 void PrintWordList(const std::vector<std::string>& wordList);
-
-
 
 //+------------------------\----------------------------------
 //|			 Main		   |
@@ -252,7 +252,21 @@ void ExecuteCommand(const Command& command)
 
 	if(command.name == DISPLAY_HISTORY_COMMAND)
 	{
-		PrintHistory();
+		CommandListIndex numCommands{ HISTORY_DEFAULT_DISPLAY_SIZE };
+		if(command.arguments.size() > 1)
+		{
+			std::cerr << SHELL_NAME << ": " << DISPLAY_HISTORY_COMMAND << ": too many parameters" << std::endl;
+			return;
+		}
+		else if(command.arguments.size() == 1)
+		{
+			if(!StringToCommandListIndex(command.arguments[0], numCommands))
+			{
+				std::cerr << SHELL_NAME << ": " << DISPLAY_HISTORY_COMMAND << ": invalid parameter" << std::endl;
+				return;
+			}
+		}
+		PrintHistory(numCommands);
 		return;
 	}
 
@@ -262,12 +276,12 @@ void ExecuteCommand(const Command& command)
 	{
 		if(command.arguments.size() > 1)
 		{
-			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": too many arguments" << std::endl;
+			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": too many parameters" << std::endl;
 			return;
 		}
 		else if(command.arguments.empty())
 		{
-			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": missing operand" << std::endl;
+			std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": missing parameter" << std::endl;
 			return;
 		}
 		else
@@ -275,7 +289,7 @@ void ExecuteCommand(const Command& command)
 			commandToExecutePtr = GetCommandPtr(commandHistory, command.arguments[0]);
 			if(!commandToExecutePtr)
 			{
-				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid index" << std::endl;
+				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid parameter" << std::endl;
 				return;
 			}
 		}
@@ -288,7 +302,7 @@ void ExecuteCommand(const Command& command)
 	if(commandToExecutePtr->name == CHANGE_DIRECTORY_COMMAND)
 	{
 		if(commandToExecutePtr->arguments.size() > 1)
-			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
+			std::cerr << SHELL_NAME << ": " << CHANGE_DIRECTORY_COMMAND << ": too many parameters" << std::endl;
 		else if(commandToExecutePtr->arguments.empty())
 			ChangeWorkingDirectory("");
 		else
@@ -297,7 +311,7 @@ void ExecuteCommand(const Command& command)
 	else if(commandToExecutePtr->name == CHANGE_TO_LAST_DIRECTORY_COMMAND)
 	{
 		if(!commandToExecutePtr->arguments.empty())
-			std::cerr << SHELL_NAME << ": " << CHANGE_TO_LAST_DIRECTORY_COMMAND << ": too many arguments" << std::endl;
+			std::cerr << SHELL_NAME << ": " << CHANGE_TO_LAST_DIRECTORY_COMMAND << ": too many parameters" << std::endl;
 		else
 			ChangeWorkingDirectory(lastWorkingDirectory);
 	}
@@ -306,12 +320,24 @@ void ExecuteCommand(const Command& command)
 }
 const Command* GetCommandPtr(const std::list<Command>& commandList, const std::string& indexStr)
 {
-	try {
-		return GetCommandPtr(commandList, std::stoul(indexStr));
-	}
-	catch(const std::logic_error & e) {
+	CommandListIndex index;
+	if(StringToCommandListIndex(indexStr, index))
+		return GetCommandPtr(commandList, index);
+	else
 		return nullptr;
+}
+bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut)
+{
+	try {
+		indexOut = std::stoul(stringIn);
+		if(indexOut < 1)
+			return false;
+		--indexOut;
 	}
+	catch(const std::logic_error& e) {
+		return false;
+	}
+	return true;
 }
 const Command* GetCommandPtr(const std::list<Command>& commandList, CommandListIndex index)
 {
@@ -515,7 +541,7 @@ void GetUser(std::string& userOut)
 	else
 		userOut = user;
 }
-void PrintHistory()
+void PrintHistory(CommandListIndex numCommands)
 {
 	// Print history list in reverse so that most recent command is printed last
 	if(commandHistory.empty())
@@ -523,10 +549,14 @@ void PrintHistory()
 		std::cout << SHELL_NAME << ": " << DISPLAY_HISTORY_COMMAND << ": empty" << std::endl;
 		return;
 	}
-
-	CommandListIndex i{ commandHistory.size() - 1 };
+	if(numCommands > HISTORY_MAX_SIZE)
+		numCommands = HISTORY_MAX_SIZE;
+	CommandListIndex i{ commandHistory.size() };
 	for(auto cmdIter = commandHistory.rbegin(); cmdIter != commandHistory.rend(); ++cmdIter, --i)
-		std::cout << SHELL_NAME << ": ! " << i << ": " << *cmdIter << std::endl;
+	{
+		if(i <= numCommands)
+			std::cout << SHELL_NAME << ": ! " << i << ": " << *cmdIter << std::endl;
+	}
 }
 std::ostream& operator<<(std::ostream& os, const Command& cmd)
 {
