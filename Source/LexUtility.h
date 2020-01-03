@@ -26,6 +26,9 @@ namespace Lex
 		bool GetHomeDirectory(std::string& homeOut);
 		bool GetWorkingDirectory(std::string& pathOut);
 		bool ChangeWorkingDirectory(const std::string& path);
+		bool ExecuteExternalAppAndWait(const std::string& pathToApp,
+								const std::vector<std::string>& arguments, 
+								const std::string& perrorMessage);
 	}
 
 	namespace Lists
@@ -59,5 +62,10 @@ namespace Lex
 			else
 				destinationList.push_front(sourceElement);
 		}
+	}
+
+	namespace Strings
+	{
+		bool ToInt(const std::string& str, int& out);
 	}
 }

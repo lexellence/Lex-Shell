@@ -9,9 +9,9 @@
 #include <vector>
 #include <list>
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <unistd.h>
-#include <sys/wait.h>
 #include "LexUtility.h"
 #include "LexConsole.h"
 
@@ -78,13 +78,12 @@ namespace Lesh
 	//|		   Execute		   |
 	//\------------------------/----------------------------------
 	void ExecuteCommand(const Command& command);
-	bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut);
-	void ExecuteExternalApp(const Command& command);
-	
+
 	//+------------------------\----------------------------------
 	//|		    Parse		   |
 	//\------------------------/----------------------------------
 	void SeparateIntoCommands(const std::vector<std::string>& wordList, std::vector<Command>& commandListOut);
+	bool StringToCommandListIndex(const std::string& str, CommandListIndex& out);
 
 	//+------------------------\----------------------------------
 	//|		   Directory	   |
@@ -178,29 +177,36 @@ namespace Lesh
 
 		// Point commandToExecutePtr to either input or entry in history
 		const Command* commandToExecutePtr{ &command };
-		if(command.name == EXECUTE_HISTORY_COMMAND)
+		if(commandToExecutePtr->name == EXECUTE_HISTORY_COMMAND)
 		{
-			if(command.arguments.size() > 1)
+			if(commandToExecutePtr->arguments.size() > 1)
 			{
 				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": too many parameters" << std::endl;
 				return;
 			}
-			else if(command.arguments.empty())
+			else if(commandToExecutePtr->arguments.empty())
 			{
 				std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": missing parameter" << std::endl;
 				return;
 			}
 			else
 			{
-				CommandListIndex input;
-				if(StringToCommandListIndex(command.arguments[0], input) && input > 0)
-					commandToExecutePtr = Lex::Lists::GetElementPtr(commandHistory, input - 1);
-				else
-					commandToExecutePtr = nullptr;
+				// Convert parameter string to CommandListIndex
+				CommandListIndex input{ 0 };
+				bool succeeded = (StringToCommandListIndex(commandToExecutePtr->arguments[0], input) && input > 0);
 
-				if(!commandToExecutePtr)
+				// Get list element
+				if(succeeded)
 				{
-					std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND << ": invalid parameter" << std::endl;
+					commandToExecutePtr = Lex::Lists::GetElementPtr(commandHistory, input - 1);
+					if(!commandToExecutePtr)
+						succeeded = false;
+				}
+				if(!succeeded)
+				{
+					std::cerr << SHELL_NAME << ": " << EXECUTE_HISTORY_COMMAND 
+							  << ": invalid parameter (min=" << (commandHistory.empty() ? '0' : '1') 
+							  << " max=" << commandHistory.size() << ')' << std::endl;
 					return;
 				}
 			}
@@ -232,85 +238,8 @@ namespace Lesh
 				ChangeDirectory(lastWorkingDirectory);
 		}
 		else
-			ExecuteExternalApp(*commandToExecutePtr);
-	}
-	bool StringToCommandListIndex(const std::string& stringIn, CommandListIndex& indexOut)
-	{
-		try {
-			indexOut = (CommandListIndex)std::stoul(stringIn);
-		}
-		catch(const std::logic_error & e) {
-			return false;
-		}
-		return true;
-	}
-	void ExecuteExternalApp(const Command& command)
-	{
-		if(command.name.empty())
-			return;
-
-		errno = 0;
-		pid_t child_pid;
-		child_pid = fork();
-
-		// If fork failed, print error
-		if(child_pid < 0)
-		{
-			std::string message{ SHELL_NAME + ": " + command.name };
-			perror(message.c_str());
-		}
-
-		// Child
-		if(child_pid == 0)
-		{
-			// Convert command to c-style string list 
-			std::vector<char*> cStyleStringList;
-			{
-				// Separate path from app name and only put name in argv[0] while sending the full path to execvp 
-				{
-					std::string appName;
-					{
-						std::size_t endOfPathIndex{ command.name.find_last_of('/') };
-						if(endOfPathIndex == std::string::npos)
-							appName = command.name;
-						else
-							appName = command.name.substr(endOfPathIndex + 1);
-					}
-					cStyleStringList.emplace_back(const_cast<char*>(appName.c_str()));
-				}
-
-				// Add arguments
-				for(auto const& arg : command.arguments)
-					cStyleStringList.emplace_back(const_cast<char*>(arg.c_str()));
-
-				// exec expects null-terminated array
-				cStyleStringList.push_back(nullptr);
-			}
-
-			// execute program
-			errno = 0;
-			int result = execvp(command.name.c_str(), cStyleStringList.data());
-
-			// If execvp failed, print error and terminate child process
-			if(result < 0)
-			{
-				std::string message{ SHELL_NAME + ": " + command.name };
-				perror(message.c_str());
-				exit(EXIT_FAILURE);
-			}
-		}
-		// Parent
-		else
-		{
-			// Wait for child to finish
-			errno = 0;
-			if(waitpid(child_pid, nullptr, WUNTRACED) < 0)
-			{
-				// Print error, if any
-				std::string message{ SHELL_NAME + ": " + command.name };
-				perror(message.c_str());
-			}
-		}
+			Lex::Posix::ExecuteExternalAppAndWait(commandToExecutePtr->name, commandToExecutePtr->arguments,
+										   SHELL_NAME + ": " + commandToExecutePtr->name);
 	}
 
 	//+------------------------\----------------------------------
@@ -364,6 +293,20 @@ namespace Lesh
 			}
 		}
 	}
+	bool StringToCommandListIndex(const std::string& str, CommandListIndex& out)
+	{
+		static_assert(sizeof(CommandListIndex) >= sizeof(int));
+		int numCommandsInt;
+
+		if(Lex::Strings::ToInt(str, numCommandsInt) && numCommandsInt >= 0)
+		{
+			out = static_cast<CommandListIndex>(numCommandsInt);
+			return true;
+		}
+		else
+			return false;
+	}
+
 
 	//+------------------------\----------------------------------
 	//|		   Directory	   |
