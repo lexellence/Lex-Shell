@@ -10,6 +10,7 @@ Or create shortcut on desktop in Debian:
 	Name=lex
 	Command=/usr/local/bin/lex
 	Run in terminal=enabled
+
 //+-----------------------------\-----------------------------
 //| 	Change default shell 	|
 //\-----------------------------/-----------------------------
@@ -22,6 +23,7 @@ Verfiy that lex was added to shell list:
 Change default shell to lex for current user: 
 	$ chsh -s /path/to/lex
 Log out and log in to apply changes. Opening a terminal will now use lex.
+
 //+-----------------------------\-----------------------------
 //| 	  Revert to Bash 	|
 //\-----------------------------/-----------------------------
@@ -32,6 +34,7 @@ To switch back to bash:
 	the lex executable and then opening a terminal. Now you can follow the previous 
 	instruction for switching back to bash. Then, if you wish, move lex executable 
 	back to its original location.)
+
 //+---------------------\-------------------------------------
 //|	    Usage 	|
 //\---------------------/-------------------------------------
